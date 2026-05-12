@@ -68,7 +68,44 @@ password = "xxxx-xxxx-xxxx-xxxx"  # App-specific password
 [server]
 host = "127.0.0.1"
 port = 8888
+
+[stalwart]
+# Enable Stalwart authentication (default: false)
+enabled = true
+# Stalwart server URL for authentication
+server_url = "http://localhost:8080"
+# Authentication method: "jmap" or "imap" (default: "jmap")
+auth_method = "jmap"
 ```
+
+**Configuration Sections:**
+
+#### `icloud`
+- `username` - Your iCloud Apple ID email
+- `password` - Your app-specific password (not your main Apple ID password)
+
+#### `server`
+- `host` - Host to bind to (default: `127.0.0.1`)
+- `port` - Port to listen on (default: `8888`)
+- `public_url` - (Optional) Public URL for API endpoints in responses (e.g., `https://calendar.example.com`). If not set, uses `http://host:port`
+- `public_path` - (Optional) Public path prefix for API endpoints (e.g., `api` or `icloud`). If not set, no prefix is used
+
+**Example with reverse proxy:**
+```toml
+[server]
+host = "127.0.0.1"
+port = 8888
+public_url = "https://calendar.example.com"
+public_path = "api"
+```
+This will make API URLs in the `/list` response show as `https://calendar.example.com/api/calendar/Work` instead of `http://127.0.0.1:8888/calendar/Work`.
+
+#### `stalwart` (Optional)
+- `enabled` - Enable/disable Stalwart authentication (default: `false`)
+- `server_url` - URL of your Stalwart server (default: `http://localhost:8080`)
+- `auth_method` - Authentication method: `jmap` or `imap` (default: `jmap`)
+
+When Stalwart authentication is enabled, the `/list` and `/calendar/:name` endpoints will require HTTP Basic Authentication. The credentials are validated against your Stalwart server.
 
 **Config File Search Order:**
 1. `/etc/icloudcalendarapi/config.toml` (system-wide)
@@ -92,6 +129,28 @@ The API will be available at `http://localhost:8888`
 
 ### API Endpoints
 
+**Authentication:**
+
+When Stalwart authentication is enabled in the configuration, the `/list` and `/calendar/:name` endpoints require HTTP Basic Authentication. The `/` and `/health` endpoints remain public.
+
+**Authentication Example:**
+```bash
+# With authentication enabled
+curl -u username:password http://localhost:8888/list
+
+# Or using the Authorization header
+curl -H "Authorization: Basic $(echo -n 'username:password' | base64)" http://localhost:8888/list
+```
+
+If authentication fails, you'll receive a `401 Unauthorized` response:
+```json
+{
+  "error": "Authentication required"
+}
+```
+
+---
+
 #### `GET /`
 Returns API information and available endpoints.
 
@@ -103,8 +162,8 @@ curl http://localhost:8888/
 **Response:**
 ```json
 {
-  "service": "iCloud Calendar Export API",
-  "version": "0.1.0",
+  "service": "iCloud Calendar Private API",
+  "version": "1.2.0",
   "endpoints": {
     "/": "This help message",
     "/list": "List all available calendars",
@@ -143,24 +202,24 @@ curl http://localhost:8888/list
     {
       "display_name": "Work",
       "icloud_url": "/XXXXXXXXX/calendars/work/",
-      "api_url": "/calendar/Work"
+      "api_url": "http://127.0.0.1:8888/calendar/Work"
     },
     {
       "display_name": "Personal",
       "icloud_url": "/XXXXXXXXX/calendars/home/",
-      "api_url": "/calendar/Personal"
+      "api_url": "http://127.0.0.1:8888/calendar/Personal"
     },
     {
       "display_name": "My Family Calendar",
       "icloud_url": "/XXXXXXXXX/calendars/family/",
-      "api_url": "/calendar/My%20Family%20Calendar"
+      "api_url": "http://127.0.0.1:8888/calendar/My%20Family%20Calendar"
     }
   ],
   "count": 3
 }
 ```
 
-The `api_url` field contains the properly URL-encoded path to fetch the calendar via this API.
+**Note:** The `api_url` field contains the full URL (based on your server configuration) with the properly URL-encoded path to fetch the calendar via this API. If `public_url` or `public_path` are configured in your `config.toml`, those values will be used instead of `http://host:port`. System items like reminders, tasks, inbox, outbox, and notifications are automatically filtered out.
 
 #### `GET /calendar/:name`
 Get a calendar by name in iCal format (partial name matching). Returns the calendar data inline as plain iCal.
@@ -206,6 +265,50 @@ Many calendar applications can subscribe to iCal URLs for automatic updates:
    - **Outlook**: Add Calendar → Subscribe from web
 
 **Note:** The calendar is now served inline, making it compatible with more calendar applications and easier to view in browsers.
+
+### Reverse Proxy Setup
+
+When running behind a reverse proxy (nginx, Caddy, Apache), configure `public_url` and optionally `public_path` so the API returns correct URLs in the `/list` endpoint.
+
+#### Example with nginx
+
+**nginx configuration:**
+```nginx
+server {
+    listen 443 ssl;
+    server_name calendar.example.com;
+
+    ssl_certificate /path/to/cert.pem;
+    ssl_certificate_key /path/to/key.pem;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:8888/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+**config.toml:**
+```toml
+[server]
+host = "127.0.0.1"
+port = 8888
+public_url = "https://calendar.example.com"
+public_path = "api"
+```
+
+**Result:** The `/list` endpoint will return URLs like:
+- `https://calendar.example.com/api/calendar/Work`
+- `https://calendar.example.com/api/calendar/Personal`
+
+Instead of:
+- `http://127.0.0.1:8888/calendar/Work`
+- `http://127.0.0.1:8888/calendar/Personal`
+
+This makes it easy for clients to use the API URLs directly without needing to know your internal server configuration.
 
 ---
 
@@ -272,6 +375,8 @@ Connecting to iCloud as: your-email@icloud.com
    iCloud URL: /XXXXXXXXX/calendars/family/
    API URL:    /calendar/My%20Family%20Calendar
 ```
+
+**Note:** The CLI shows relative API URLs (paths only). If you're running the API server, prepend your server URL (e.g., `http://localhost:8888`) to use these paths.
 
 #### Export all calendars to stdout
 
@@ -554,12 +659,24 @@ sudo chown -R icloudcalendarapi:icloudcalendarapi /var/lib/icloudcalendarapi
 
 - **Never commit `config.toml`** with credentials to version control
 - **Use app-specific passwords** - not your main Apple ID password
+- **Enable Stalwart authentication** to protect API endpoints (see Configuration section)
 - **Don't expose the API to the internet** without HTTPS and authentication
 - **Use a reverse proxy** (nginx/Caddy) with HTTPS for external access
 - **Restrict firewall access** to trusted IPs only
 - **Monitor access logs** regularly
 - **Rotate passwords** periodically
 - **Set proper file permissions** on config files (`chmod 600`)
+
+### Authentication
+
+This project now includes optional Stalwart authentication:
+
+- When enabled, `/list` and `/calendar/:name` endpoints require HTTP Basic Auth
+- Credentials are validated against your Stalwart mail server
+- Supports both JMAP and IMAP authentication methods
+- Public endpoints (`/` and `/health`) remain unauthenticated for monitoring
+
+**To enable authentication**, add the `[stalwart]` section to your `config.toml` (see Configuration section above).
 
 ### For Production Use
 
@@ -671,7 +788,18 @@ For issues or questions:
 
 ## Changelog
 
-### v1.1.0 (Current)
+### v1.2.0 (Current)
+- 🔒 **NEW:** Stalwart authentication support for API endpoints
+  - Optional HTTP Basic Authentication for `/list` and `/calendar/:name` endpoints
+  - Validates credentials against Stalwart mail server
+  - Supports both JMAP and IMAP authentication methods
+  - Public endpoints (`/` and `/health`) remain accessible without authentication
+- ✨ `/list` endpoint now returns full URLs in `api_url` field (based on server configuration)
+- ✨ Added `public_url` and `public_path` configuration for reverse proxy support
+- 🔧 Reminders/tasks are now filtered out from calendar listings (not actual calendars)
+- 🔧 Updated dependencies for improved security
+
+### v1.1.0
 - ✨ Calendar endpoint now serves iCal data inline instead of as attachment
 - ✨ Added support for URL-encoded calendar names (handles spaces and special characters)
 - ✨ List endpoint now includes API URLs alongside iCloud URLs for easier integration

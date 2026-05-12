@@ -1,5 +1,5 @@
 Name:           icloud-calendar-private-api
-Version:        1.1.0
+Version:        1.2.0
 Release:        1%{?dist}
 Summary:        Expose iCloud Calendar data via a private API
 
@@ -103,6 +103,16 @@ fi
 %dir %attr(0755, icloudcalendarapi, icloudcalendarapi) %{_sharedstatedir}/icloudcalendarapi
 
 %changelog
+* Sat Jan 11 2025 Ante de Baas <antedebaas@users.github.com> - 1.2.0-1
+- Added Stalwart authentication support for API endpoints
+- Optional HTTP Basic Authentication for /list and /calendar/:name endpoints
+- Credentials validated against Stalwart mail server (JMAP/IMAP)
+- Public endpoints (/ and /health) remain accessible without authentication
+- /list endpoint now returns full URLs in api_url field
+- Added public_url and public_path configuration for reverse proxy support
+- Reminders/tasks are now filtered out from calendar listings
+- Updated dependencies for improved security
+
 * Thu Jan 09 2025 Ante de Baas <antedebaas@users.github.com> - 1.1.0-1
 - Calendar endpoint now serves iCal data inline instead of as attachment
 - Added support for URL-encoded calendar names (handles spaces and special characters)

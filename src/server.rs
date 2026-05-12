@@ -1,9 +1,10 @@
 use axum::{
-    extract::{Path, State},
-    http::StatusCode,
+    extract::{Path, State, Request},
+    http::{StatusCode, HeaderMap},
     response::{IntoResponse, Response},
     routing::get,
     Json, Router,
+    middleware::{self, Next},
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -12,6 +13,7 @@ use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use urlencoding::{decode, encode};
+use base64::{Engine as _, engine::general_purpose};
 
 use icloud_calendar_private_api::ICloudCalendarClient;
 
@@ -19,6 +21,8 @@ use icloud_calendar_private_api::ICloudCalendarClient;
 struct Config {
     icloud: ICloudConfig,
     server: ServerConfig,
+    #[serde(default)]
+    stalwart: StalwartConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -27,12 +31,16 @@ struct ICloudConfig {
     password: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 struct ServerConfig {
     #[serde(default = "default_host")]
     host: String,
     #[serde(default = "default_port")]
     port: u16,
+    #[serde(default)]
+    public_url: Option<String>,
+    #[serde(default)]
+    public_path: Option<String>,
 }
 
 fn default_host() -> String {
@@ -43,9 +51,143 @@ fn default_port() -> u16 {
     8888
 }
 
+#[derive(Debug, Deserialize, Clone)]
+struct StalwartConfig {
+    #[serde(default)]
+    enabled: bool,
+    #[serde(default = "default_stalwart_url")]
+    server_url: String,
+    #[serde(default = "default_auth_method")]
+    auth_method: String,
+}
+
+impl Default for StalwartConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            server_url: default_stalwart_url(),
+            auth_method: default_auth_method(),
+        }
+    }
+}
+
+fn default_stalwart_url() -> String {
+    "http://localhost:8080".to_string()
+}
+
+fn default_auth_method() -> String {
+    "jmap".to_string()
+}
+
 #[derive(Clone)]
 struct AppState {
     client: Arc<Mutex<ICloudCalendarClient>>,
+    stalwart_config: StalwartConfig,
+    server_config: ServerConfig,
+}
+
+// Stalwart authentication validator
+async fn validate_stalwart_credentials(
+    config: &StalwartConfig,
+    username: &str,
+    password: &str,
+) -> Result<bool, anyhow::Error> {
+    if !config.enabled {
+        return Ok(true); // Authentication disabled, allow access
+    }
+
+    let client = reqwest::Client::new();
+    
+    match config.auth_method.as_str() {
+        "jmap" => {
+            // JMAP authentication endpoint
+            let url = format!("{}/.well-known/jmap", config.server_url);
+            let response = client
+                .get(&url)
+                .basic_auth(username, Some(password))
+                .send()
+                .await?;
+            
+            Ok(response.status().is_success())
+        }
+        "imap" => {
+            // For IMAP, we can try to authenticate via a simple IMAP login
+            // This is a simplified check - in production, you might want to use a proper IMAP client
+            // For now, we'll use JMAP as the default and log a warning
+            tracing::warn!("IMAP authentication not fully implemented, falling back to JMAP");
+            let url = format!("{}/.well-known/jmap", config.server_url);
+            let response = client
+                .get(&url)
+                .basic_auth(username, Some(password))
+                .send()
+                .await?;
+            
+            Ok(response.status().is_success())
+        }
+        _ => {
+            tracing::error!("Unknown authentication method: {}", config.auth_method);
+            Ok(false)
+        }
+    }
+}
+
+// Authentication middleware
+async fn auth_middleware(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    request: Request,
+    next: Next,
+) -> Result<Response, AppError> {
+    // If authentication is disabled, proceed without checks
+    if !state.stalwart_config.enabled {
+        return Ok(next.run(request).await);
+    }
+
+    // Extract Authorization header
+    let auth_header = headers
+        .get("authorization")
+        .and_then(|h| h.to_str().ok());
+
+    if let Some(auth_value) = auth_header {
+        if auth_value.starts_with("Basic ") {
+            // Decode Basic Auth credentials
+            let encoded = &auth_value[6..];
+            if let Ok(decoded_bytes) = general_purpose::STANDARD.decode(encoded) {
+                if let Ok(decoded) = String::from_utf8(decoded_bytes) {
+                    let parts: Vec<&str> = decoded.splitn(2, ':').collect();
+                    if parts.len() == 2 {
+                        let username = parts[0];
+                        let password = parts[1];
+
+                        // Validate credentials against Stalwart
+                        match validate_stalwart_credentials(&state.stalwart_config, username, password).await {
+                            Ok(true) => {
+                                tracing::debug!("Authentication successful for user: {}", username);
+                                return Ok(next.run(request).await);
+                            }
+                            Ok(false) => {
+                                tracing::warn!("Authentication failed for user: {}", username);
+                            }
+                            Err(e) => {
+                                tracing::error!("Authentication error: {}", e);
+                                return Err(AppError::Internal(anyhow::anyhow!("Authentication service error")));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Authentication failed or missing
+    Ok((
+        StatusCode::UNAUTHORIZED,
+        [("WWW-Authenticate", "Basic realm=\"iCloud Calendar API\"")],
+        Json(serde_json::json!({
+            "error": "Authentication required"
+        })),
+    )
+        .into_response())
 }
 
 // Custom error type
@@ -96,11 +238,26 @@ async fn list_calendars(State(state): State<AppState>) -> Result<Json<CalendarLi
     let mut client = state.client.lock().await;
     let calendars = client.list_calendars().await?;
     
-    // Transform CalendarInfo to CalendarEntry with API URLs
+    // Construct base URL from server config
+    // Use public_url if set, otherwise use host:port
+    let base_url = if let Some(public_url) = &state.server_config.public_url {
+        public_url.trim_end_matches('/').to_string()
+    } else {
+        format!("http://{}:{}", state.server_config.host, state.server_config.port)
+    };
+    
+    // Add public_path if configured
+    let base_path = if let Some(public_path) = &state.server_config.public_path {
+        format!("{}/{}", base_url, public_path.trim_matches('/'))
+    } else {
+        base_url
+    };
+    
+    // Transform CalendarInfo to CalendarEntry with full API URLs
     let calendar_entries: Vec<CalendarEntry> = calendars
         .into_iter()
         .map(|cal| {
-            let api_url = format!("/calendar/{}", encode(&cal.display_name));
+            let api_url = format!("{}/calendar/{}", base_path, encode(&cal.display_name));
             CalendarEntry {
                 display_name: cal.display_name,
                 icloud_url: cal.url,
@@ -143,8 +300,8 @@ async fn get_calendar(
 // Handler for GET /
 async fn root() -> Json<serde_json::Value> {
     Json(serde_json::json!({
-        "service": "iCloud Calendar Export API",
-        "version": "0.1.0",
+        "service": "iCloud Calendar Private API",
+        "version": "1.2.0",
         "endpoints": {
             "/": "This help message",
             "/list": "List all available calendars",
@@ -199,6 +356,26 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("Loaded configuration from: {}", config_path_used.unwrap());
     tracing::info!("iCloud username: {}", config.icloud.username);
+    
+    // Log Stalwart authentication status
+    if config.stalwart.enabled {
+        tracing::info!("🔒 Stalwart authentication: ENABLED");
+        tracing::info!("   Server URL: {}", config.stalwart.server_url);
+        tracing::info!("   Auth method: {}", config.stalwart.auth_method);
+    } else {
+        tracing::warn!("🔓 Stalwart authentication: DISABLED (API endpoints are unprotected)");
+    }
+    
+    // Log public URL configuration
+    if config.server.public_url.is_some() || config.server.public_path.is_some() {
+        tracing::info!("🌍 Public URL configuration:");
+        if let Some(url) = &config.server.public_url {
+            tracing::info!("   Public URL: {}", url);
+        }
+        if let Some(path) = &config.server.public_path {
+            tracing::info!("   Public path: /{}", path.trim_matches('/'));
+        }
+    }
 
     // Create iCloud client
     let client = ICloudCalendarClient::new(
@@ -208,17 +385,28 @@ async fn main() -> anyhow::Result<()> {
 
     let state = AppState {
         client: Arc::new(Mutex::new(client)),
+        stalwart_config: config.stalwart.clone(),
+        server_config: config.server.clone(),
     };
 
     // Build router
-    let app = Router::new()
+    // Public endpoints (no authentication required)
+    let public_routes = Router::new()
         .route("/", get(root))
-        .route("/health", get(health))
+        .route("/health", get(health));
+
+    // Protected endpoints (require authentication)
+    let protected_routes = Router::new()
         .route("/list", get(list_calendars))
         .route("/calendar/:name", get(get_calendar))
+        .layer(middleware::from_fn_with_state(state.clone(), auth_middleware));
+
+    // Combine routes
+    let app = public_routes
+        .merge(protected_routes)
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
-        .with_state(state);
+        .with_state(state.clone());
 
     let addr = format!("{}:{}", config.server.host, config.server.port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;

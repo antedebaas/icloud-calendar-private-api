@@ -9,3 +9,17 @@ password = "xxxx-xxxx-xxxx-xxxx"
 host = "127.0.0.1"
 # Port to listen on (default: 8888)
 port = 8888
+# Optional: Public URL for API endpoints (e.g., "https://calendar.example.com")
+# If not set, uses "http://host:port"
+# public_url = "https://calendar.example.com"
+# Optional: Public path prefix (e.g., "api" or "icloud")
+# If not set, no path prefix is used
+# public_path = "api"
+
+[stalwart]
+# Enable Stalwart authentication (default: false)
+enabled = true
+# Stalwart server URL for authentication
+server_url = "http://localhost:8080"
+# Authentication method: "jmap" or "imap" (default: "jmap")
+auth_method = "jmap"

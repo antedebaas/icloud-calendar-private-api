@@ -87,10 +87,10 @@ impl ICloudCalendarClient {
         }
 
         let body = response.text().await?;
-        
+
         let href = self.extract_href(&body, "current-user-principal")
             .context("Could not find principal URL in response")?;
-        
+
         self.principal_url = Some(href);
         Ok(())
     }
@@ -100,9 +100,9 @@ impl ICloudCalendarClient {
             .principal_url
             .as_ref()
             .context("Principal URL not set")?;
-        
+
         let full_url = self.build_url(principal_url);
-        
+
         let propfind_body = r#"<?xml version="1.0" encoding="UTF-8"?>
 <d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
   <d:prop>
@@ -127,10 +127,10 @@ impl ICloudCalendarClient {
         }
 
         let body = response.text().await?;
-        
+
         let href = self.extract_href(&body, "calendar-home-set")
             .context("Could not find calendar home URL in response")?;
-        
+
         self.calendar_home_url = Some(href);
         Ok(())
     }
@@ -143,17 +143,17 @@ impl ICloudCalendarClient {
         if self.calendar_home_url.is_none() {
             self.discover_calendar_home().await?;
         }
-        
+
         let calendar_home = self
             .calendar_home_url
             .as_ref()
             .context("Calendar home URL not set")?;
-        
+
         let full_url = self.build_url(calendar_home);
-        
+
         let mut headers = self.get_headers();
         headers.insert("Depth", HeaderValue::from_static("1"));
-        
+
         let propfind_body = r#"<?xml version="1.0" encoding="UTF-8"?>
 <d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/" xmlns:a="http://apple.com/ns/ical/">
   <d:prop>
@@ -182,7 +182,7 @@ impl ICloudCalendarClient {
 
         let body = response.text().await?;
         let calendars = self.parse_calendars(&body)?;
-        
+
         Ok(calendars)
     }
 
@@ -194,9 +194,9 @@ impl ICloudCalendarClient {
         } else {
             0
         };
-        
+
         let xml_section = &xml[search_start..];
-        
+
         let href_patterns = [
             "<d:href>",
             "<D:href>",
@@ -205,7 +205,7 @@ impl ICloudCalendarClient {
             "<HREF>",
             "<HREF ",
         ];
-        
+
         for start_pattern in &href_patterns {
             if let Some(start) = xml_section.find(start_pattern) {
                 let after_tag_name = start + start_pattern.len();
@@ -218,7 +218,7 @@ impl ICloudCalendarClient {
                 } else {
                     after_tag_name
                 };
-                
+
                 let end_patterns = ["</d:href>", "</D:href>", "</href>", "</HREF>"];
                 for end_pattern in &end_patterns {
                     if let Some(end) = xml_section[content_start..].find(end_pattern) {
@@ -230,23 +230,23 @@ impl ICloudCalendarClient {
                 }
             }
         }
-        
+
         None
     }
-    
+
     fn parse_calendars(&self, xml: &str) -> Result<Vec<CalendarInfo>> {
         let mut calendars = Vec::new();
-        
+
         let responses: Vec<&str> = xml.split("<response").collect();
-        
+
         for response in responses.iter().skip(1) {
             if !response.contains("<calendar") && !response.contains("<c:calendar") {
                 continue;
             }
-            
+
             let mut url = String::new();
             let mut display_name = String::new();
-            
+
             let href_patterns = [("<href>", "</href>"), ("<href ", "</href>"), ("<d:href>", "</d:href>"), ("<d:href ", "</d:href>")];
             for (start_pattern, end_pattern) in &href_patterns {
                 if let Some(start) = response.find(start_pattern) {
@@ -260,14 +260,14 @@ impl ICloudCalendarClient {
                     } else {
                         after_tag
                     };
-                    
+
                     if let Some(end) = response[content_start..].find(end_pattern) {
                         url = response[content_start..content_start + end].trim().to_string();
                         break;
                     }
                 }
             }
-            
+
             let displayname_patterns = [("<displayname>", "</displayname>"), ("<displayname ", "</displayname>"), ("<d:displayname>", "</d:displayname>"), ("<d:displayname ", "</d:displayname>")];
             for (start_pattern, end_pattern) in &displayname_patterns {
                 if let Some(start) = response.find(start_pattern) {
@@ -281,14 +281,14 @@ impl ICloudCalendarClient {
                     } else {
                         after_tag
                     };
-                    
+
                     if let Some(end) = response[content_start..].find(end_pattern) {
                         display_name = response[content_start..content_start + end].trim().to_string();
                         break;
                     }
                 }
             }
-            
+
             if !url.is_empty() && url.ends_with('/') {
                 let skip_paths = [
                     "/inbox/",
@@ -296,9 +296,9 @@ impl ICloudCalendarClient {
                     "/notification/",
                     "/calendars/",
                 ];
-                
+
                 let should_skip = skip_paths.iter().any(|&skip| url.ends_with(skip));
-                
+
                 if !should_skip {
                     calendars.push(CalendarInfo {
                         url,
@@ -311,38 +311,38 @@ impl ICloudCalendarClient {
                 }
             }
         }
-        
+
         Ok(calendars)
     }
 
     pub async fn get_calendar_ical(&mut self, calendar_name: &str) -> Result<String> {
         let calendars = self.list_calendars().await?;
-        
+
         let calendar = calendars
             .iter()
             .find(|c| c.display_name.contains(calendar_name))
             .ok_or_else(|| anyhow::anyhow!("Calendar '{}' not found", calendar_name))?;
-        
+
         let xml_response = self.get_calendar_events(&calendar.url).await?;
         let events = self.extract_ical_events(&xml_response)?;
-        
+
         if events.is_empty() {
             return Ok(format!(
                 "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//iCloud Calendar Private API//EN\r\nCALSCALE:GREGORIAN\r\nX-WR-CALNAME:{}\r\nX-WR-TIMEZONE:UTC\r\nEND:VCALENDAR\r\n",
                 calendar.display_name
             ));
         }
-        
+
         let ical = self.combine_ical_events(events, &calendar.display_name);
         Ok(ical)
     }
 
     async fn get_calendar_events(&self, calendar_url: &str) -> Result<String> {
         let full_url = self.build_url(calendar_url);
-        
+
         let mut headers = self.get_headers();
         headers.insert("Depth", HeaderValue::from_static("1"));
-        
+
         let report_body = r#"<?xml version="1.0" encoding="UTF-8"?>
 <c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
   <d:prop>
@@ -378,7 +378,7 @@ impl ICloudCalendarClient {
 
     fn extract_ical_events(&self, xml_response: &str) -> Result<Vec<String>> {
         let mut events = Vec::new();
-        
+
         let patterns = [
             "<calendar-data xmlns=",
             "<calendar-data>",
@@ -386,12 +386,12 @@ impl ICloudCalendarClient {
             "<C:calendar-data>",
             "<cal:calendar-data>",
         ];
-        
+
         for start_pattern in &patterns {
             let mut pos = 0;
             while let Some(start) = xml_response[pos..].find(start_pattern) {
                 let after_tag_start = pos + start + start_pattern.len();
-                
+
                 let content_start = if start_pattern.contains(' ') || start_pattern.ends_with('=') {
                     if let Some(close_bracket) = xml_response[after_tag_start..].find('>') {
                         after_tag_start + close_bracket + 1
@@ -402,7 +402,7 @@ impl ICloudCalendarClient {
                 } else {
                     after_tag_start
                 };
-                
+
                 let end_patterns = ["</calendar-data>", "</c:calendar-data>", "</C:calendar-data>", "</cal:calendar-data>"];
                 let mut found_end = None;
                 for end_pattern in &end_patterns {
@@ -411,52 +411,52 @@ impl ICloudCalendarClient {
                         break;
                     }
                 }
-                
+
                 if let Some(end_idx) = found_end {
                     let mut ical_data = xml_response[content_start..end_idx].to_string();
-                    
+
                     if ical_data.starts_with("<![CDATA[") {
                         ical_data = ical_data.strip_prefix("<![CDATA[").unwrap_or(&ical_data).to_string();
                         if let Some(cdata_end) = ical_data.rfind("]]>") {
                             ical_data = ical_data[..cdata_end].to_string();
                         }
                     }
-                    
+
                     let unescaped = ical_data
                         .replace("&lt;", "<")
                         .replace("&gt;", ">")
                         .replace("&amp;", "&")
                         .replace("&quot;", "\"")
                         .replace("&#13;", "\r");
-                    
+
                     if unescaped.contains("BEGIN:VCALENDAR") || unescaped.contains("BEGIN:VEVENT") {
                         events.push(unescaped);
                     }
-                    
+
                     pos = end_idx;
                 } else {
                     break;
                 }
             }
-            
+
             if !events.is_empty() {
                 break;
             }
         }
-        
+
         Ok(events)
     }
 
     fn combine_ical_events(&self, events: Vec<String>, calendar_name: &str) -> String {
         let mut combined = String::new();
-        
+
         combined.push_str("BEGIN:VCALENDAR\r\n");
         combined.push_str("VERSION:2.0\r\n");
         combined.push_str("PRODID:-//iCloud Calendar Private API//EN\r\n");
         combined.push_str("CALSCALE:GREGORIAN\r\n");
         combined.push_str(&format!("X-WR-CALNAME:{}\r\n", calendar_name));
         combined.push_str("X-WR-TIMEZONE:UTC\r\n");
-        
+
         for event in events {
             let mut pos = 0;
             while let Some(start) = event[pos..].find("BEGIN:VEVENT") {
@@ -470,7 +470,7 @@ impl ICloudCalendarClient {
                 }
             }
         }
-        
+
         combined.push_str("END:VCALENDAR\r\n");
         combined
     }
