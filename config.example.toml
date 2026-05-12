@@ -1,0 +1,11 @@
+[icloud]
+# Your iCloud Apple ID email
+username = "your-email@icloud.com"
+# Your app-specific password (generate at https://appleid.apple.com)
+password = "xxxx-xxxx-xxxx-xxxx"
+
+[server]
+# Host to bind to (default: 127.0.0.1)
+host = "127.0.0.1"
+# Port to listen on (default: 8888)
+port = 8888

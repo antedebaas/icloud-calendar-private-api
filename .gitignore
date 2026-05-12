@@ -1,0 +1,27 @@
+# Rust build artifacts
+target/
+Cargo.lock
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Output files
+*.ics
+*.ical
+
+# Environment variables (NEVER commit credentials!)
+.env
+.env.local
+credentials.txt
+password.txt
+config.toml  # Contains iCloud credentials
+
+# OS files
+.DS_Store
+Thumbs.db
+
+/config.toml
