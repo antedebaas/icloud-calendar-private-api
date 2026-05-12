@@ -4,7 +4,7 @@ use clap::Parser;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use std::io::Write;
 
-/// iCloud Calendar Export Tool
+/// iCloud Calendar Private API - Command Line Tool
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -631,8 +631,8 @@ struct CalendarInfo {
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    println!("🍎 iCloud Calendar Export Tool");
-    println!("================================\n");
+    println!("🍎 iCloud Calendar Private API - CLI Tool");
+    println!("==========================================\n");
     println!("Connecting to iCloud as: {}", args.username);
     println!();
 

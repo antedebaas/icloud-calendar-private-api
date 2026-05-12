@@ -15,11 +15,11 @@ if [ ! -f "config.toml" ]; then
 fi
 
 # Build if needed
-if [ ! -f "target/release/icloud_calendar_server" ]; then
+if [ ! -f "target/release/icloud-calendar-private-api" ]; then
     echo "📦 Building server (first time only)..."
-    cargo build --release --bin icloud_calendar_server
+    cargo build --release --bin icloud-calendar-private-api
     echo ""
 fi
 
 # Start the server
-cargo run --bin icloud_calendar_server --release
+cargo run --bin icloud-calendar-private-api --release

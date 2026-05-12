@@ -1,259 +1,619 @@
-# iCloud Calendar Export Tool
+# KEEP IN MIND
+this is entirely vibecoded and intended for educational purposes. Use at your own risk.
+this project is also not intended to be exposed over the internet, so security is not a primary concern. If you want to use it in a production environment, please review the code and implement proper security measures.
 
-A Rust application that connects to Apple iCloud using CalDAV protocol and exports private calendar data as iCal format.
+# iCloud Calendar Private API
 
-**NEW:** Now includes a REST API server! See [API.md](API.md) for details.
+A Rust application that connects to Apple iCloud using CalDAV protocol and exposes private calendar data via REST API and command-line interface.
+
+**Repository:** https://github.com/antedebaas/icloud-calendar-private-api
 
 ## Features
 
 - 🔐 Secure authentication with Apple iCloud CalDAV
+- 🌐 REST API server with HTTP endpoints
+- 💻 Command-line tool for exports
 - 📅 Lists all available calendars
-- 🔍 Filter calendars by name
 - 📥 Exports calendar events as standard iCal format
-- 💾 Save to file or output to stdout
-- ✨ Clean, user-friendly CLI interface
-
-## Prerequisites
-
-- Rust 1.70 or later
-- An Apple ID (iCloud account)
-- App-specific password (recommended) or account password
+- 📦 RPM package for Fedora/RHEL/CentOS
+- 🔄 Systemd service integration
 
 ## Quick Start
 
-### Command Line Tool
+### Prerequisites
 
-1. Clone or download this project
-2. Navigate to the project directory:
-   ```bash
-   cd temp
-   ```
+- Rust 1.70 or later (install from https://rustup.rs)
+- An Apple ID with iCloud calendar
+- An **app-specific password** from https://appleid.apple.com
 
-3. Build the project:
-   ```bash
-   cargo build --release
-   ```
+⚠️ **Important:** With 2FA enabled (recommended), you MUST use an app-specific password, not your regular Apple ID password.
 
-### REST API Server
+### Generate App-Specific Password
 
-See [API.md](API.md) for complete API documentation.
+1. Go to https://appleid.apple.com
+2. Sign in with your Apple ID
+3. Go to **Security** → **App-Specific Passwords**
+4. Click **Generate Password**
+5. Label it "iCloud Calendar API"
+6. Copy the password (format: `xxxx-xxxx-xxxx-xxxx`)
+
+### Installation
 
 ```bash
-# Create config file
-cp config.example.toml config.toml
-# Edit config.toml with your credentials
+# Clone the repository
+git clone https://github.com/antedebaas/icloud-calendar-private-api.git
+cd icloud-calendar-private-api/temp
 
-# Run the server
+# Build both binaries
+cargo build --release
+```
+
+This creates two binaries:
+- `icloud-calendar-private-api` - REST API server
+- `icloud-calendar-private-cli` - Command-line export tool
+
+---
+
+## REST API Server
+
+### Configuration
+
+Create `config.toml`:
+
+```toml
+[icloud]
+username = "your-email@icloud.com"
+password = "xxxx-xxxx-xxxx-xxxx"  # App-specific password
+
+[server]
+host = "127.0.0.1"
+port = 8888
+```
+
+**Config File Search Order:**
+1. `/etc/icloudcalendarapi/config.toml` (system-wide)
+2. `config.toml` (current directory)
+3. `./config.toml` (explicit current directory)
+
+### Start the Server
+
+```bash
+# Using cargo
+cargo run --bin icloud-calendar-private-api --release
+
+# Or use the binary directly
+./target/release/icloud-calendar-private-api
+
+# Or use the convenience script
 ./start_server.sh
-# Or: cargo run --bin icloud_calendar_server --release
 ```
 
 The API will be available at `http://localhost:8888`
 
-## Installation
+### API Endpoints
 
-1. Clone or download this project
-2. Navigate to the project directory:
-   ```bash
-   cd temp
-   ```
+#### `GET /`
+Returns API information and available endpoints.
 
-3. Build the project:
-   ```bash
-   cargo build --release
-   ```
+**Example:**
+```bash
+curl http://localhost:8888/
+```
 
-## Important: Authentication Setup
+**Response:**
+```json
+{
+  "service": "iCloud Calendar Export API",
+  "version": "0.1.0",
+  "endpoints": {
+    "/": "This help message",
+    "/list": "List all available calendars",
+    "/calendar/:name": "Get calendar by name (returns iCal format)"
+  }
+}
+```
 
-### Two-Factor Authentication (2FA)
+#### `GET /health`
+Health check endpoint.
 
-If you have two-factor authentication enabled on your Apple ID (which is highly recommended), you **must** use an app-specific password instead of your regular password.
+**Example:**
+```bash
+curl http://localhost:8888/health
+```
 
-### Generating an App-Specific Password
+**Response:**
+```json
+{
+  "status": "ok"
+}
+```
 
-1. Go to [appleid.apple.com](https://appleid.apple.com)
-2. Sign in with your Apple ID
-3. Navigate to **Security** section
-4. Under **App-Specific Passwords**, click **Generate Password**
-5. Enter a label (e.g., "iCloud Calendar Export")
-6. Copy the generated password (format: `xxxx-xxxx-xxxx-xxxx`)
-7. Use this password with the tool
+#### `GET /list`
+List all available calendars.
 
-**Note:** App-specific passwords are different from your regular Apple ID password and provide secure, limited access to your iCloud data.
+**Example:**
+```bash
+curl http://localhost:8888/list
+```
 
-## Usage
+**Response:**
+```json
+{
+  "calendars": [
+    {
+      "display_name": "Work",
+      "url": "/16940607888/calendars/work/"
+    },
+    {
+      "display_name": "Personal",
+      "url": "/16940607888/calendars/home/"
+    }
+  ],
+  "count": 2
+}
+```
 
-### Basic Usage (Export all calendars to stdout)
+#### `GET /calendar/:name`
+Get a calendar by name in iCal format (partial name matching).
+
+**Example:**
+```bash
+# Download calendar
+curl http://localhost:8888/calendar/Work -o work.ics
+
+# View in terminal
+curl http://localhost:8888/calendar/Personal
+```
+
+**Response:**
+```
+Content-Type: text/calendar; charset=utf-8
+Content-Disposition: attachment; filename="Work.ics"
+
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//iCloud Calendar Private API//EN
+...
+END:VCALENDAR
+```
+
+### Subscribe in Calendar Apps
+
+Many calendar applications can subscribe to iCal URLs for automatic updates:
+
+1. Start the API server
+2. Get the URL: `http://localhost:8888/calendar/YourCalendarName`
+3. Add to your calendar app:
+   - **Apple Calendar**: File → New Calendar Subscription
+   - **Google Calendar**: Settings → Add Calendar → From URL
+   - **Outlook**: Add Calendar → Subscribe from web
+
+---
+
+## Command-Line Tool
+
+### Usage
 
 ```bash
-cargo run -- --username "your-apple-id@icloud.com" --password "your-app-specific-password"
+icloud-calendar-private-cli [OPTIONS] --username <USERNAME> --password <PASSWORD>
 ```
 
-Or with the compiled binary:
-
-```bash
-./target/release/icloud_calendar_export \
-  --username "your-apple-id@icloud.com" \
-  --password "xxxx-xxxx-xxxx-xxxx"
-```
-
-### Export to File
-
-```bash
-cargo run -- \
-  --username "your-apple-id@icloud.com" \
-  --password "xxxx-xxxx-xxxx-xxxx" \
-  --output my_calendar.ics
-```
-
-### Export Specific Calendar
-
-```bash
-cargo run -- \
-  --username "your-apple-id@icloud.com" \
-  --password "xxxx-xxxx-xxxx-xxxx" \
-  --calendar "Work" \
-  --output work_calendar.ics
-```
-
-### Command Line Options
+### Options
 
 ```
-Options:
   -u, --username <USERNAME>    iCloud username (Apple ID)
-  -p, --password <PASSWORD>    iCloud password (or app-specific password)
+  -p, --password <PASSWORD>    iCloud password (app-specific password)
   -o, --output <OUTPUT>        Output file for iCal data (default: stdout)
-  -c, --calendar <CALENDAR>    Calendar name to export (default: all calendars)
+  -c, --calendar <CALENDAR>    Calendar name to export (default: all)
   -h, --help                   Print help
   -V, --version                Print version
 ```
 
-## How It Works
+### Examples
 
-This tool uses the CalDAV protocol to communicate with iCloud:
-
-1. **Discovery Phase**: Discovers the CalDAV principal and calendar home URLs
-2. **List Calendars**: Retrieves all available calendars for your account
-3. **Fetch Events**: Downloads all events from selected calendar(s)
-4. **Export**: Converts the data to standard iCal (`.ics`) format
-
-The CalDAV protocol is the standard way to access calendar data and is officially supported by Apple.
-
-## Output Format
-
-The tool outputs data in the standard iCalendar (RFC 5545) format, which includes:
-
-- Calendar metadata (name, timezone, etc.)
-- Event details (title, description, location)
-- Date and time information
-- Recurrence rules
-- Attendees and organizers
-- Alarms and reminders
-
-The generated `.ics` files can be imported into:
-- Apple Calendar
-- Google Calendar
-- Microsoft Outlook
-- Mozilla Thunderbird
-- Any other calendar application supporting iCal format
-
-## Example Output
-
-```ical
-BEGIN:VCALENDAR
-VERSION:2.0
-PRODID:-//iCloud Calendar Export//EN
-CALSCALE:GREGORIAN
-X-WR-CALNAME:Personal
-X-WR-TIMEZONE:UTC
-BEGIN:VEVENT
-DTSTART:20240115T140000Z
-DTEND:20240115T150000Z
-SUMMARY:Team Meeting
-DESCRIPTION:Weekly sync with the team
-LOCATION:Conference Room A
-UID:unique-event-id@icloud.com
-END:VEVENT
-END:VCALENDAR
-```
-
-## Security Considerations
-
-- **Never commit your password or app-specific password to version control**
-- Use environment variables for credentials in scripts:
-  ```bash
-  export ICLOUD_USERNAME="your-email@icloud.com"
-  export ICLOUD_PASSWORD="xxxx-xxxx-xxxx-xxxx"
-  cargo run -- --username "$ICLOUD_USERNAME" --password "$ICLOUD_PASSWORD"
-  ```
-- App-specific passwords can be revoked at any time from your Apple ID settings
-- The tool uses HTTPS for all communications with iCloud
-
-## Troubleshooting
-
-### Enable Debug Mode
-
-If you're experiencing issues, enable debug mode to see the raw XML responses:
+#### Export all calendars to stdout
 
 ```bash
-DEBUG=1 cargo run --release -- \
+./target/release/icloud-calendar-private-cli \
   --username "your-email@icloud.com" \
   --password "xxxx-xxxx-xxxx-xxxx"
 ```
 
-This will show you the actual responses from iCloud's servers, which can help diagnose issues.
+#### Export to file
 
-### Authentication Errors
+```bash
+./target/release/icloud-calendar-private-cli \
+  -u "your-email@icloud.com" \
+  -p "xxxx-xxxx-xxxx-xxxx" \
+  -o all_calendars.ics
+```
 
-- **Error: "Failed to discover principal: 401"**
-  - Your username or password is incorrect
-  - If you have 2FA enabled, make sure you're using an app-specific password
-  - Check that your Apple ID is correct (usually ends with @icloud.com, @me.com, or @mac.com)
+#### Export specific calendar
 
-- **Error: "Could not find principal URL in response"**
-  - Enable debug mode (see above) to see the actual response
-  - This may indicate an authentication issue or unexpected response format
-  - Verify your credentials are correct
+```bash
+./target/release/icloud-calendar-private-cli \
+  -u "your-email@icloud.com" \
+  -p "xxxx-xxxx-xxxx-xxxx" \
+  -c "Work" \
+  -o work.ics
+```
 
-### Connection Errors
+#### Using environment variables
 
-- **Error: "Connection timeout" or "Network error"**
-  - Check your internet connection
-  - Verify that you can access iCloud.com in your browser
-  - Some corporate networks may block CalDAV traffic
+```bash
+export ICLOUD_USERNAME="your-email@icloud.com"
+export ICLOUD_PASSWORD="xxxx-xxxx-xxxx-xxxx"
 
-### No Calendars Found
+./target/release/icloud-calendar-private-cli \
+  -u "$ICLOUD_USERNAME" \
+  -p "$ICLOUD_PASSWORD" \
+  -c "Personal" \
+  -o personal.ics
+```
 
-- Check that you have calendars set up in your iCloud account
-- Log into iCloud.com and verify your calendars are visible there
+### Automation with Cron
 
-### Empty Calendar Export
+```bash
+# Edit crontab
+crontab -e
 
-- The calendar might not have any events
-- Check the date range (this tool exports all events by default)
+# Add daily backup at 2 AM
+0 2 * * * /usr/bin/icloud-calendar-private-cli -u "user@email.com" -p "xxxx-xxxx-xxxx-xxxx" -o "/backups/calendar-$(date +\%Y\%m\%d).ics"
+```
+
+---
+
+## RPM Installation
+
+### Install from RPM
+
+```bash
+# Install the package
+sudo dnf install icloud-calendar-private-api
+
+# Or from COPR
+sudo dnf copr enable antedebaas/icloud-calendar-private-api
+sudo dnf install icloud-calendar-private-api
+```
+
+### What Gets Installed
+
+- **Server binary:** `/usr/bin/icloud-calendar-private-api`
+- **CLI binary:** `/usr/bin/icloud-calendar-private-cli`
+- **Systemd service:** `/usr/lib/systemd/system/icloud-calendar-private-api.service`
+- **Config directory:** `/etc/icloudcalendarapi/`
+- **Example config:** `/etc/icloudcalendarapi/config.example.toml`
+- **System user:** `icloudcalendarapi`
+
+### Post-Installation Setup
+
+```bash
+# 1. Copy example config
+sudo cp /etc/icloudcalendarapi/config.example.toml /etc/icloudcalendarapi/config.toml
+
+# 2. Edit configuration
+sudo nano /etc/icloudcalendarapi/config.toml
+
+# 3. Set permissions
+sudo chown icloudcalendarapi:icloudcalendarapi /etc/icloudcalendarapi/config.toml
+sudo chmod 600 /etc/icloudcalendarapi/config.toml
+
+# 4. Enable and start service
+sudo systemctl enable --now icloud-calendar-private-api.service
+
+# 5. Check status
+sudo systemctl status icloud-calendar-private-api.service
+
+# 6. View logs
+sudo journalctl -u icloud-calendar-private-api.service -f
+```
+
+### Verify Installation
+
+```bash
+# Test API
+curl http://localhost:8888/list
+
+# Use CLI tool
+icloud-calendar-private-cli --help
+```
+
+### Firewall Configuration
+
+```bash
+# Open port 8888 (only if needed for remote access)
+sudo firewall-cmd --permanent --add-port=8888/tcp
+sudo firewall-cmd --reload
+```
+
+---
+
+## Docker Deployment
+
+### Dockerfile
+
+```dockerfile
+FROM rust:1.70 as builder
+WORKDIR /app
+COPY . .
+RUN cargo build --release --bin icloud-calendar-private-api
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /app/target/release/icloud-calendar-private-api /usr/local/bin/
+WORKDIR /app
+COPY config.toml .
+EXPOSE 8888
+CMD ["icloud-calendar-private-api"]
+```
+
+### Build and Run
+
+```bash
+# Build image
+docker build -t icloud-calendar-api .
+
+# Run container
+docker run -p 8888:8888 -v ./config.toml:/app/config.toml icloud-calendar-api
+```
+
+---
+
+## Development
+
+### Project Structure
+
+```
+temp/
+├── src/
+│   ├── lib.rs              # iCloud CalDAV client library
+│   ├── main.rs             # CLI tool
+│   └── server.rs           # REST API server
+├── Cargo.toml              # Rust dependencies
+├── config.example.toml     # Example configuration
+├── icloud-calendar-private-api.spec    # RPM spec file
+└── icloud-calendar-private-api.service # Systemd service
+```
+
+### Build from Source
+
+```bash
+# Build both binaries
+cargo build --release
+
+# Build only the server
+cargo build --release --bin icloud-calendar-private-api
+
+# Build only the CLI
+cargo build --release --bin icloud-calendar-private-cli
+
+# Run tests
+cargo test
+
+# Check code
+cargo check
+```
+
+### Debug Mode
+
+```bash
+# Enable debug logging
+RUST_LOG=debug cargo run --bin icloud-calendar-private-api
+```
+
+---
 
 ## Technical Details
 
-### CalDAV Protocol
+### How It Works
 
-The tool implements the following CalDAV operations:
-- **PROPFIND**: Discovers calendar resources and properties
-- **REPORT**: Queries calendar events with filters
+1. **CalDAV Protocol**: Uses Apple's official CalDAV protocol
+2. **Discovery**: Automatically discovers principal and calendar home URLs
+3. **Authentication**: HTTP Basic Auth with app-specific passwords
+4. **PROPFIND**: Lists available calendars
+5. **REPORT**: Queries calendar events
+6. **iCal Export**: Converts CalDAV data to standard RFC 5545 iCal format
 
-### iCloud CalDAV Endpoint
+### CalDAV Endpoint
 
-- Base URL: `https://caldav.icloud.com/`
-- Authentication: HTTP Basic Auth
-- Supported: All standard CalDAV operations
+- **Base URL:** `https://caldav.icloud.com/`
+- **Protocol:** CalDAV (WebDAV extension)
+- **Authentication:** HTTP Basic Auth
+- **Transport:** HTTPS
 
-## License
+### Supported Features
 
-This project is provided as-is for educational and personal use.
+- ✅ Event titles, descriptions, locations
+- ✅ Date and time information (with timezones)
+- ✅ Recurrence rules
+- ✅ Attendees and organizers
+- ✅ Alarms and reminders
+- ✅ Multiple calendars
+- ✅ System and shared calendars (filtered out)
+
+---
+
+## Troubleshooting
+
+### Authentication Errors (401)
+
+- Verify your Apple ID email is correct
+- Ensure you're using an **app-specific password**
+- Generate a new app-specific password
+- Check for typos in credentials
+
+### No Calendars Found
+
+- Log into iCloud.com and verify calendars exist
+- Some shared calendars may not be accessible via CalDAV
+- Check service logs for detailed errors
+
+### Server Won't Start
+
+```bash
+# Check config file exists
+ls -l /etc/icloudcalendarapi/config.toml
+ls -l config.toml
+
+# Verify config syntax
+cat config.toml
+
+# Check port isn't in use
+lsof -i :8888
+
+# View detailed logs
+RUST_LOG=debug ./target/release/icloud-calendar-private-api
+```
+
+### Connection Errors
+
+- Check internet connection
+- Verify you can access https://caldav.icloud.com/
+- Check firewall rules
+- Some corporate networks may block CalDAV traffic
+
+### Permission Errors (RPM Installation)
+
+```bash
+# Fix config ownership
+sudo chown icloudcalendarapi:icloudcalendarapi /etc/icloudcalendarapi/config.toml
+sudo chmod 600 /etc/icloudcalendarapi/config.toml
+
+# Fix directory permissions
+sudo chown -R icloudcalendarapi:icloudcalendarapi /etc/icloudcalendarapi
+sudo chown -R icloudcalendarapi:icloudcalendarapi /var/lib/icloudcalendarapi
+```
+
+---
+
+## Security Considerations
+
+⚠️ **Important Security Notes:**
+
+- **Never commit `config.toml`** with credentials to version control
+- **Use app-specific passwords** - not your main Apple ID password
+- **Don't expose the API to the internet** without HTTPS and authentication
+- **Use a reverse proxy** (nginx/Caddy) with HTTPS for external access
+- **Restrict firewall access** to trusted IPs only
+- **Monitor access logs** regularly
+- **Rotate passwords** periodically
+- **Set proper file permissions** on config files (`chmod 600`)
+
+### For Production Use
+
+If you choose to use this in production (not recommended without review):
+
+1. ✅ Use HTTPS with valid certificates
+2. ✅ Implement rate limiting
+3. ✅ Add authentication to API endpoints
+4. ✅ Monitor and log all access
+5. ✅ Use secrets management (not config files)
+6. ✅ Regular security audits
+7. ✅ Keep dependencies updated
+
+---
+
+## Use Cases
+
+### 1. Calendar Backups
+
+```bash
+# Daily automated backups with CLI
+0 2 * * * /usr/bin/icloud-calendar-private-cli -u "$USER" -p "$PASS" -o "/backups/cal-$(date +\%Y\%m\%d).ics"
+```
+
+### 2. Calendar Integration
+
+```bash
+# Start API server, integrate with other services
+curl http://localhost:8888/list | jq .
+```
+
+### 3. Calendar Migration
+
+```bash
+# Export from iCloud
+./target/release/icloud-calendar-private-cli -u "old@email.com" -p "xxxx" -o export.ics
+
+# Import to Google Calendar, Outlook, etc.
+```
+
+### 4. Calendar Subscriptions
+
+```
+# Subscribe in calendar apps
+http://your-server:8888/calendar/Work
+```
+
+---
+
+## Comparison: API vs CLI
+
+| Feature | REST API Server | CLI Tool |
+|---------|----------------|----------|
+| **Use Case** | Continuous access | One-time exports |
+| **Integration** | HTTP endpoints | Shell scripts |
+| **Scheduling** | Always running | Cron jobs |
+| **Multiple Clients** | Yes | No |
+| **Auto-updates** | Yes (subscriptions) | No |
+| **Resource Usage** | Always running | Only when executed |
+| **Best For** | Services, apps | Backups, migrations |
+
+**Use the API Server when:**
+- You need continuous calendar access
+- Multiple clients need to access calendars
+- You want calendar subscriptions
+- Integrating with other services
+
+**Use the CLI Tool when:**
+- You need one-time exports
+- Creating backup scripts
+- Migrating calendars
+- Running scheduled exports
+
+---
 
 ## Contributing
 
-Feel free to submit issues or pull requests if you find bugs or want to add features.
+This is an educational project. If you want to contribute:
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Submit a pull request
+
+---
+
+## License
+
+MIT License - See LICENSE file for details
+
+---
 
 ## Disclaimer
 
 This tool is not affiliated with, authorized, maintained, sponsored, or endorsed by Apple Inc. or any of its affiliates or subsidiaries. This is an independent project that uses publicly documented CalDAV protocols.
+
+Use at your own risk. The author assumes no liability for any damages or losses.
+
+---
+
+## Support
+
+For issues or questions:
+- **GitHub Issues:** https://github.com/antedebaas/icloud-calendar-private-api/issues
+- **Check logs:** `journalctl -u icloud-calendar-private-api.service -f`
+- **Debug mode:** `RUST_LOG=debug ./target/release/icloud-calendar-private-api`
+
+---
+
+## Changelog
+
+### v1.0.0 (Initial Release)
+- REST API server with HTTP endpoints
+- Command-line export tool
+- RPM package for Fedora/RHEL/CentOS
+- Systemd service integration
+- CalDAV protocol implementation
+- iCal (RFC 5545) export format
+- Multi-calendar support

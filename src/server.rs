@@ -12,7 +12,7 @@ use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use icloud_calendar_export::{CalendarInfo, ICloudCalendarClient};
+use icloud_calendar_private_api::{CalendarInfo, ICloudCalendarClient};
 
 #[derive(Debug, Deserialize)]
 struct Config {
@@ -150,12 +150,32 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     // Load configuration
-    let config_content = std::fs::read_to_string("config.toml")
-        .expect("Failed to read config.toml. Please create one from config.example.toml");
+    // Try system-wide config first, then fall back to local directory
+    let config_paths = [
+        "/etc/icloudcalendarapi/config.toml",
+        "config.toml",
+        "./config.toml",
+    ];
+    
+    let mut config_content = None;
+    let mut config_path_used = None;
+    
+    for path in &config_paths {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            config_content = Some(content);
+            config_path_used = Some(path);
+            break;
+        }
+    }
+    
+    let config_content = config_content.expect(
+        "Failed to read config.toml.\n\nTried:\n  - /etc/icloudcalendarapi/config.toml\n  - config.toml\n  - ./config.toml\n\nPlease create one from config.example.toml"
+    );
+    
     let config: Config = toml::from_str(&config_content)
         .expect("Failed to parse config.toml");
 
-    tracing::info!("Loaded configuration");
+    tracing::info!("Loaded configuration from: {}", config_path_used.unwrap());
     tracing::info!("iCloud username: {}", config.icloud.username);
 
     // Create iCloud client

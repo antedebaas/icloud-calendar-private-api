@@ -328,7 +328,7 @@ impl ICloudCalendarClient {
         
         if events.is_empty() {
             return Ok(format!(
-                "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//iCloud Calendar Export//EN\r\nCALSCALE:GREGORIAN\r\nX-WR-CALNAME:{}\r\nX-WR-TIMEZONE:UTC\r\nEND:VCALENDAR\r\n",
+                "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//iCloud Calendar Private API//EN\r\nCALSCALE:GREGORIAN\r\nX-WR-CALNAME:{}\r\nX-WR-TIMEZONE:UTC\r\nEND:VCALENDAR\r\n",
                 calendar.display_name
             ));
         }
@@ -452,7 +452,7 @@ impl ICloudCalendarClient {
         
         combined.push_str("BEGIN:VCALENDAR\r\n");
         combined.push_str("VERSION:2.0\r\n");
-        combined.push_str("PRODID:-//iCloud Calendar Export//EN\r\n");
+        combined.push_str("PRODID:-//iCloud Calendar Private API//EN\r\n");
         combined.push_str("CALSCALE:GREGORIAN\r\n");
         combined.push_str(&format!("X-WR-CALNAME:{}\r\n", calendar_name));
         combined.push_str("X-WR-TIMEZONE:UTC\r\n");

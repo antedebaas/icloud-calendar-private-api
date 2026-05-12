@@ -1,14 +1,20 @@
 [package]
-name = "icloud_calendar_export"
+name = "icloud-calendar-private-api"
 version = "0.1.0"
 edition = "2021"
+authors = ["Ante de Baas <ante@debaas.net>"]
+description = "iCloud Calendar Private API - Export iCloud calendars via REST API"
+repository = "https://github.com/antedebaas/icloud-calendar-private-api"
+license = "MIT"
+keywords = ["icloud", "calendar", "caldav", "api", "ical"]
+categories = ["web-programming", "api-bindings"]
 
 [[bin]]
-name = "icloud_calendar_export"
+name = "icloud-calendar-private-cli"
 path = "src/main.rs"
 
 [[bin]]
-name = "icloud_calendar_server"
+name = "icloud-calendar-private-api"
 path = "src/server.rs"
 
 [dependencies]
