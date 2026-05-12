@@ -1,5 +1,5 @@
 Name:           icloud-calendar-private-api
-Version:        1.0.0
+Version:        1.1.0
 Release:        1%{?dist}
 Summary:        Expose iCloud Calendar data via a private API
 
@@ -103,5 +103,12 @@ fi
 %dir %attr(0755, icloudcalendarapi, icloudcalendarapi) %{_sharedstatedir}/icloudcalendarapi
 
 %changelog
+* Thu Jan 09 2025 Ante de Baas <antedebaas@users.github.com> - 1.1.0-1
+- Calendar endpoint now serves iCal data inline instead of as attachment
+- Added support for URL-encoded calendar names (handles spaces and special characters)
+- List endpoint now includes API URLs alongside iCloud URLs
+- CLI tool now supports --list flag to show calendars with API URLs
+- Improved compatibility with calendar applications and browsers
+
 * Tue May 12 2026 Ante de Baas <antedebaas@users.github.com> - 1.0.0-1
 - Initial package

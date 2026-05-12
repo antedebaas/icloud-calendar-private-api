@@ -28,6 +28,7 @@ xml-rs = "0.8"
 base64 = "0.21"
 url = "2.4"
 clap = { version = "4.4", features = ["derive"] }
+urlencoding = "2.1"
 
 # Web server dependencies
 axum = "0.7"

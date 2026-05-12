@@ -3,6 +3,7 @@ use base64::{engine::general_purpose, Engine as _};
 use clap::Parser;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use std::io::Write;
+use urlencoding::encode;
 
 /// iCloud Calendar Private API - Command Line Tool
 #[derive(Parser, Debug)]
@@ -15,6 +16,10 @@ struct Args {
     /// iCloud password (or app-specific password)
     #[arg(short, long)]
     password: String,
+
+    /// List all available calendars with API URLs (metadata only, does not export calendar data)
+    #[arg(short, long)]
+    list: bool,
 
     /// Output file for iCal data (default: stdout)
     #[arg(short, long)]
@@ -631,13 +636,44 @@ struct CalendarInfo {
 async fn main() -> Result<()> {
     let args = Args::parse();
 
+    // Validate arguments: --list should not be used with export options
+    if args.list && (args.output.is_some() || args.calendar.is_some()) {
+        eprintln!("❌ Error: --list flag cannot be used with --output or --calendar options");
+        eprintln!("   Use --list to only display available calendars");
+        eprintln!("   Use --calendar and --output to export calendar data");
+        std::process::exit(1);
+    }
+
     println!("🍎 iCloud Calendar Private API - CLI Tool");
-    println!("==========================================\n");
+    println!("==========================================");
+    println!();
     println!("Connecting to iCloud as: {}", args.username);
     println!();
 
     let mut client = ICloudCalendarClient::new(args.username, args.password)?;
     
+    // Handle list mode - ONLY lists calendars, does NOT export data
+    if args.list {
+        client.discover_principal().await?;
+        client.discover_calendar_home().await?;
+        let calendars = client.list_calendars().await?;
+        
+        println!("📋 Available Calendars ({})", calendars.len());
+        println!("==========================================");
+        println!();
+        
+        for cal in calendars {
+            let api_url = format!("/calendar/{}", encode(&cal.display_name));
+            println!("📅 {}", cal.display_name);
+            println!("   iCloud URL: {}", cal.url);
+            println!("   API URL:    {}", api_url);
+            println!();
+        }
+        
+        return Ok(());
+    }
+    
+    // Export calendar mode
     let ical_data = client.export_calendar(args.calendar).await?;
     
     // Output the iCal data
@@ -649,7 +685,8 @@ async fn main() -> Result<()> {
         }
         None => {
             println!("\n📄 iCal Output:");
-            println!("================\n");
+            println!("================");
+            println!();
             println!("{}", ical_data);
         }
     }

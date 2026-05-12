@@ -129,7 +129,7 @@ curl http://localhost:8888/health
 ```
 
 #### `GET /list`
-List all available calendars.
+List all available calendars with both iCloud URLs and API URLs.
 
 **Example:**
 ```bash
@@ -142,33 +142,49 @@ curl http://localhost:8888/list
   "calendars": [
     {
       "display_name": "Work",
-      "url": "/16940607888/calendars/work/"
+      "icloud_url": "/XXXXXXXXX/calendars/work/",
+      "api_url": "/calendar/Work"
     },
     {
       "display_name": "Personal",
-      "url": "/16940607888/calendars/home/"
+      "icloud_url": "/XXXXXXXXX/calendars/home/",
+      "api_url": "/calendar/Personal"
+    },
+    {
+      "display_name": "My Family Calendar",
+      "icloud_url": "/XXXXXXXXX/calendars/family/",
+      "api_url": "/calendar/My%20Family%20Calendar"
     }
   ],
-  "count": 2
+  "count": 3
 }
 ```
 
+The `api_url` field contains the properly URL-encoded path to fetch the calendar via this API.
+
 #### `GET /calendar/:name`
-Get a calendar by name in iCal format (partial name matching).
+Get a calendar by name in iCal format (partial name matching). Returns the calendar data inline as plain iCal.
+
+**Note:** Calendar names with spaces or special characters should be URL-encoded (e.g., `My%20Calendar` for "My Calendar").
 
 **Example:**
 ```bash
-# Download calendar
-curl http://localhost:8888/calendar/Work -o work.ics
+# Get calendar with simple name
+curl http://localhost:8888/calendar/Work
 
-# View in terminal
-curl http://localhost:8888/calendar/Personal
+# Get calendar with spaces (URL-encoded)
+curl http://localhost:8888/calendar/My%20Personal%20Calendar
+
+# Or let your shell handle encoding
+curl "http://localhost:8888/calendar/My Personal Calendar"
+
+# Save to file
+curl http://localhost:8888/calendar/Work -o work.ics
 ```
 
 **Response:**
 ```
 Content-Type: text/calendar; charset=utf-8
-Content-Disposition: attachment; filename="Work.ics"
 
 BEGIN:VCALENDAR
 VERSION:2.0
@@ -183,10 +199,13 @@ Many calendar applications can subscribe to iCal URLs for automatic updates:
 
 1. Start the API server
 2. Get the URL: `http://localhost:8888/calendar/YourCalendarName`
+   - For calendar names with spaces, use URL encoding: `http://localhost:8888/calendar/My%20Calendar`
 3. Add to your calendar app:
    - **Apple Calendar**: File → New Calendar Subscription
    - **Google Calendar**: Settings → Add Calendar → From URL
    - **Outlook**: Add Calendar → Subscribe from web
+
+**Note:** The calendar is now served inline, making it compatible with more calendar applications and easier to view in browsers.
 
 ---
 
@@ -201,15 +220,58 @@ icloud-calendar-private-cli [OPTIONS] --username <USERNAME> --password <PASSWORD
 ### Options
 
 ```
-  -u, --username <USERNAME>    iCloud username (Apple ID)
-  -p, --password <PASSWORD>    iCloud password (app-specific password)
-  -o, --output <OUTPUT>        Output file for iCal data (default: stdout)
-  -c, --calendar <CALENDAR>    Calendar name to export (default: all)
-  -h, --help                   Print help
-  -V, --version                Print version
+  -u, --username <USERNAME>  iCloud username (Apple ID)
+  -p, --password <PASSWORD>  iCloud password (or app-specific password)
+  -l, --list                 List all available calendars with API URLs (metadata only, does not export calendar data)
+  -o, --output <OUTPUT>      Output file for iCal data (default: stdout)
+  -c, --calendar <CALENDAR>  Calendar name to export (default: all calendars)
+  -h, --help                 Print help
+  -V, --version              Print version
 ```
 
+**Note:** The `--list` flag cannot be combined with `--output` or `--calendar` options. Use `--list` to only view available calendars, or use `--calendar`/`--output` to export calendar data.
+
 ### Examples
+
+#### List all available calendars
+
+This command **only lists calendar names and URLs** without exporting any calendar data or events.
+
+```bash
+./target/release/icloud-calendar-private-cli \
+  --username "your-email@icloud.com" \
+  --password "xxxx-xxxx-xxxx-xxxx" \
+  --list
+```
+
+**Output:**
+```
+🍎 iCloud Calendar Private API - CLI Tool
+==========================================
+
+Connecting to iCloud as: your-email@icloud.com
+
+🔍 Discovering CalDAV principal...
+✅ Principal URL: /XXXXXXXXX/principal/
+🔍 Discovering calendar home...
+✅ Calendar Home URL: /XXXXXXXXX/calendars/
+📋 Fetching calendar list...
+
+📋 Available Calendars (3)
+==========================================
+
+📅 Work
+   iCloud URL: /XXXXXXXXX/calendars/work/
+   API URL:    /calendar/Work
+
+📅 Personal
+   iCloud URL: /XXXXXXXXX/calendars/home/
+   API URL:    /calendar/Personal
+
+📅 My Family Calendar
+   iCloud URL: /XXXXXXXXX/calendars/family/
+   API URL:    /calendar/My%20Family%20Calendar
+```
 
 #### Export all calendars to stdout
 
@@ -608,6 +670,13 @@ For issues or questions:
 ---
 
 ## Changelog
+
+### v1.1.0 (Current)
+- ✨ Calendar endpoint now serves iCal data inline instead of as attachment
+- ✨ Added support for URL-encoded calendar names (handles spaces and special characters)
+- ✨ List endpoint now includes API URLs alongside iCloud URLs for easier integration
+- ✨ CLI tool now supports `--list` flag to show calendars with API URLs
+- 🔧 Improved compatibility with calendar applications and browsers
 
 ### v1.0.0 (Initial Release)
 - REST API server with HTTP endpoints

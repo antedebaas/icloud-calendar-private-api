@@ -11,8 +11,9 @@ use tokio::sync::Mutex;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use urlencoding::{decode, encode};
 
-use icloud_calendar_private_api::{CalendarInfo, ICloudCalendarClient};
+use icloud_calendar_private_api::ICloudCalendarClient;
 
 #[derive(Debug, Deserialize)]
 struct Config {
@@ -76,8 +77,15 @@ where
 }
 
 #[derive(Serialize)]
+struct CalendarEntry {
+    display_name: String,
+    icloud_url: String,
+    api_url: String,
+}
+
+#[derive(Serialize)]
 struct CalendarListResponse {
-    calendars: Vec<CalendarInfo>,
+    calendars: Vec<CalendarEntry>,
     count: usize,
 }
 
@@ -87,11 +95,24 @@ async fn list_calendars(State(state): State<AppState>) -> Result<Json<CalendarLi
     
     let mut client = state.client.lock().await;
     let calendars = client.list_calendars().await?;
-    let count = calendars.len();
     
+    // Transform CalendarInfo to CalendarEntry with API URLs
+    let calendar_entries: Vec<CalendarEntry> = calendars
+        .into_iter()
+        .map(|cal| {
+            let api_url = format!("/calendar/{}", encode(&cal.display_name));
+            CalendarEntry {
+                display_name: cal.display_name,
+                icloud_url: cal.url,
+                api_url,
+            }
+        })
+        .collect();
+    
+    let count = calendar_entries.len();
     tracing::info!("Found {} calendar(s)", count);
     
-    Ok(Json(CalendarListResponse { calendars, count }))
+    Ok(Json(CalendarListResponse { calendars: calendar_entries, count }))
 }
 
 // Handler for GET /calendar/:name
@@ -99,20 +120,21 @@ async fn get_calendar(
     State(state): State<AppState>,
     Path(name): Path<String>,
 ) -> Result<Response, AppError> {
-    tracing::info!("Fetching calendar: {}", name);
+    // Decode URL-encoded calendar name (handles spaces and special characters)
+    let decoded_name = decode(&name)
+        .map_err(|e| anyhow::anyhow!("Failed to decode calendar name: {}", e))?;
+    
+    tracing::info!("Fetching calendar: {}", decoded_name);
     
     let mut client = state.client.lock().await;
-    let ical_data = client.get_calendar_ical(&name).await?;
+    let ical_data = client.get_calendar_ical(&decoded_name).await?;
     
-    tracing::info!("Successfully fetched calendar: {}", name);
+    tracing::info!("Successfully fetched calendar: {}", decoded_name);
     
-    // Return as text/calendar content type
+    // Return as plain text/calendar content type (inline, not as attachment)
     Ok((
         StatusCode::OK,
-        [
-            ("Content-Type", "text/calendar; charset=utf-8"),
-            ("Content-Disposition", &format!("attachment; filename=\"{}.ics\"", name)),
-        ],
+        [("Content-Type", "text/calendar; charset=utf-8")],
         ical_data,
     )
         .into_response())
